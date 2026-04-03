@@ -2,13 +2,17 @@
 
 import { useRef, useState, useCallback, useEffect } from "react";
 import { GeoStampSettings } from "@/hooks/useSettings";
-import { useGeolocation, GeoPosition } from "@/hooks/useGeolocation";
 import { compositeImage } from "@/lib/compositeImage";
 import Toast from "./Toast";
 
 interface MainScreenProps {
   settings: GeoStampSettings | null;
   onOpenSettings: () => void;
+}
+
+interface GeoPos {
+  latitude: number;
+  longitude: number;
 }
 
 export default function MainScreen({
@@ -25,9 +29,9 @@ export default function MainScreen({
   } | null>(null);
   const [processing, setProcessing] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [position, setPosition] = useState<GeoPosition | null>(null);
+  const [position, setPosition] = useState<GeoPos | null>(null);
+  const [gpsStatus, setGpsStatus] = useState("Requesting GPS…");
   const [cameraReady, setCameraReady] = useState(false);
-  const { getPosition } = useGeolocation();
 
   // Start camera stream
   useEffect(() => {
@@ -69,29 +73,76 @@ export default function MainScreen({
     return () => clearInterval(interval);
   }, []);
 
-  // Track GPS position
+  // Track GPS position — try watchPosition first, fall back to polling getCurrentPosition
   useEffect(() => {
-    const watchId = navigator.geolocation.watchPosition(
+    let active = true;
+    let watchId: number | null = null;
+    let pollTimer: ReturnType<typeof setTimeout> | null = null;
+
+    if (!navigator.geolocation) {
+      setGpsStatus("GPS not supported");
+      return;
+    }
+
+    // Try watchPosition
+    watchId = navigator.geolocation.watchPosition(
       (pos) => {
+        if (!active) return;
         setPosition({
           latitude: pos.coords.latitude,
           longitude: pos.coords.longitude,
         });
+        setGpsStatus("");
       },
-      () => {
-        // GPS unavailable
+      (err) => {
+        if (!active) return;
+        if (err.code === err.PERMISSION_DENIED) {
+          setGpsStatus("GPS denied — enable in Settings > Privacy > Location Services > Safari");
+        } else if (err.code === err.POSITION_UNAVAILABLE) {
+          setGpsStatus("GPS signal unavailable");
+        } else if (err.code === err.TIMEOUT) {
+          setGpsStatus("GPS timed out — retrying…");
+        }
+        // Also poll with getCurrentPosition as fallback
+        startPolling();
       },
-      { enableHighAccuracy: true, maximumAge: 60000 }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
     );
-    return () => navigator.geolocation.clearWatch(watchId);
+
+    function startPolling() {
+      if (!active || pollTimer) return;
+      const poll = () => {
+        if (!active) return;
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            if (!active) return;
+            setPosition({
+              latitude: pos.coords.latitude,
+              longitude: pos.coords.longitude,
+            });
+            setGpsStatus("");
+          },
+          () => {
+            // Keep retrying
+            if (active) pollTimer = setTimeout(poll, 5000);
+          },
+          { enableHighAccuracy: false, timeout: 10000, maximumAge: 120000 }
+        );
+      };
+      poll();
+    }
+
+    return () => {
+      active = false;
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      if (pollTimer) clearTimeout(pollTimer);
+    };
   }, []);
 
   const handleShutter = useCallback(() => {
     if (cameraReady && videoRef.current) {
-      // Capture directly from the video stream
       captureFromVideo();
     } else {
-      // Fallback: use file input
       fileInputRef.current?.click();
     }
   }, [cameraReady]);
@@ -113,23 +164,11 @@ export default function MainScreen({
     }
     ctx.drawImage(video, 0, 0);
 
-    // Get GPS
-    let lat: number | null = position?.latitude ?? null;
-    let lon: number | null = position?.longitude ?? null;
-    if (lat === null) {
-      try {
-        const pos = await getPosition();
-        lat = pos.latitude;
-        lon = pos.longitude;
-      } catch {
-        // use null
-      }
-    }
-
     const now = new Date();
+    const lat = position?.latitude ?? null;
+    const lon = position?.longitude ?? null;
 
     try {
-      // Convert canvas to blob, then to File for compositeImage
       const sourceBlob = await new Promise<Blob>((resolve, reject) => {
         canvas.toBlob(
           (b) => (b ? resolve(b) : reject(new Error("Canvas export failed"))),
@@ -149,14 +188,14 @@ export default function MainScreen({
         fontSize: settings?.fontSize || "medium",
       });
 
-      await savePhoto(blob, now);
+      savePhoto(blob, now);
       showSuccessToast(lat, lon, now);
     } catch {
       setToast({ message: "Error saving photo. Please try again.", type: "error" });
     } finally {
       setProcessing(false);
     }
-  }, [position, getPosition, settings, note, processing]);
+  }, [position, settings, note, processing]);
 
   const handleFileCapture = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -165,19 +204,9 @@ export default function MainScreen({
 
       setProcessing(true);
 
-      let lat: number | null = position?.latitude ?? null;
-      let lon: number | null = position?.longitude ?? null;
-      if (lat === null) {
-        try {
-          const pos = await getPosition();
-          lat = pos.latitude;
-          lon = pos.longitude;
-        } catch {
-          // use null
-        }
-      }
-
       const now = new Date();
+      const lat = position?.latitude ?? null;
+      const lon = position?.longitude ?? null;
 
       try {
         const blob = await compositeImage(file, {
@@ -190,7 +219,7 @@ export default function MainScreen({
           fontSize: settings?.fontSize || "medium",
         });
 
-        await savePhoto(blob, now);
+        savePhoto(blob, now);
         showSuccessToast(lat, lon, now);
       } catch {
         setToast({ message: "Error saving photo. Please try again.", type: "error" });
@@ -199,31 +228,20 @@ export default function MainScreen({
         if (fileInputRef.current) fileInputRef.current.value = "";
       }
     },
-    [getPosition, settings, note, position]
+    [settings, note, position]
   );
 
-  const savePhoto = async (blob: Blob, now: Date) => {
+  const savePhoto = (blob: Blob, now: Date) => {
     const dateStr = now.toISOString().replace(/[-:T]/g, "").slice(0, 15);
     const fileName = `geostamp_${dateStr}.jpg`;
-    const file = new File([blob], fileName, { type: "image/jpeg" });
-
-    // Use Web Share API if available (iOS Safari) — saves to camera roll without popup
-    if (navigator.share && navigator.canShare?.({ files: [file] })) {
-      try {
-        await navigator.share({ files: [file] });
-        return;
-      } catch {
-        // User cancelled share or share failed — fall through to download
-      }
-    }
-
-    // Fallback: trigger download
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = fileName;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const showSuccessToast = (lat: number | null, lon: number | null, now: Date) => {
@@ -255,7 +273,7 @@ export default function MainScreen({
 
   const formattedCoords = position
     ? `${position.latitude.toFixed(4)}, ${position.longitude.toFixed(4)}`
-    : "GPS unavailable";
+    : gpsStatus;
 
   return (
     <div className="flex flex-col h-dvh">
@@ -287,7 +305,9 @@ export default function MainScreen({
       <div className="px-4 pb-2">
         <div className="bg-black/60 rounded-lg px-3 py-2 text-sm space-y-0.5">
           <p className="text-white font-mono">{formattedTime}</p>
-          <p className="text-zinc-300 font-mono text-xs">{formattedCoords}</p>
+          <p className={`font-mono text-xs ${position ? "text-green-400" : "text-yellow-400"}`}>
+            {formattedCoords}
+          </p>
         </div>
       </div>
 

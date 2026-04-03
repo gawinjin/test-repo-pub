@@ -4,31 +4,32 @@ import { useState } from "react";
 
 interface OnboardingProps {
   onComplete: () => void;
-  requestPermission: () => Promise<void>;
 }
 
-export default function Onboarding({
-  onComplete,
-  requestPermission,
-}: OnboardingProps) {
-  const [error, setError] = useState<string | null>(null);
+export default function Onboarding({ onComplete }: OnboardingProps) {
   const [loading, setLoading] = useState(false);
 
   const handleGetStarted = async () => {
     setLoading(true);
-    setError(null);
+    // Request both camera and location — but proceed regardless of result
     try {
-      await requestPermission();
-      onComplete();
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Location access is required to stamp your photos. Please enable it in your browser settings."
-      );
-    } finally {
-      setLoading(false);
+      await navigator.mediaDevices.getUserMedia({ video: true });
+    } catch {
+      // Camera permission denied or unavailable — proceed anyway
     }
+    try {
+      await new Promise<void>((resolve) => {
+        navigator.geolocation.getCurrentPosition(
+          () => resolve(),
+          () => resolve(), // resolve even on error
+          { enableHighAccuracy: true, timeout: 5000, maximumAge: 60000 }
+        );
+      });
+    } catch {
+      // Geolocation unavailable — proceed anyway
+    }
+    setLoading(false);
+    onComplete();
   };
 
   return (
@@ -39,32 +40,13 @@ export default function Onboarding({
         camera and location access.
       </p>
 
-      {error && (
-        <>
-          <p className="text-red-400 text-sm mb-2 max-w-sm">{error}</p>
-          <p className="text-zinc-500 text-xs mb-4 max-w-sm">
-            If you already enabled location, reload this page for it to take
-            effect.
-          </p>
-        </>
-      )}
-
       <button
         onClick={handleGetStarted}
         disabled={loading}
         className="bg-white text-black font-semibold px-8 py-3 rounded-full text-lg disabled:opacity-50"
       >
-        {loading ? "Requesting access…" : error ? "Try Again" : "Get Started"}
+        {loading ? "Requesting access…" : "Get Started"}
       </button>
-
-      {error && (
-        <button
-          onClick={onComplete}
-          className="mt-4 text-zinc-500 text-sm underline"
-        >
-          Continue without location
-        </button>
-      )}
     </div>
   );
 }

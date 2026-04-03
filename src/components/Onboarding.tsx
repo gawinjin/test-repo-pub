@@ -40,7 +40,13 @@ export default function Onboarding({
       </p>
 
       {error && (
-        <p className="text-red-400 text-sm mb-4 max-w-sm">{error}</p>
+        <>
+          <p className="text-red-400 text-sm mb-2 max-w-sm">{error}</p>
+          <p className="text-zinc-500 text-xs mb-4 max-w-sm">
+            If you already enabled location, reload this page for it to take
+            effect.
+          </p>
+        </>
       )}
 
       <button
@@ -50,6 +56,15 @@ export default function Onboarding({
       >
         {loading ? "Requesting access…" : error ? "Try Again" : "Get Started"}
       </button>
+
+      {error && (
+        <button
+          onClick={onComplete}
+          className="mt-4 text-zinc-500 text-sm underline"
+        >
+          Continue without location
+        </button>
+      )}
     </div>
   );
 }

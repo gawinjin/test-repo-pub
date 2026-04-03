@@ -97,7 +97,7 @@ export default function MainScreen({
       (err) => {
         if (!active) return;
         if (err.code === err.PERMISSION_DENIED) {
-          setGpsStatus("GPS denied — enable in Settings > Privacy > Location Services > Safari");
+          setGpsStatus("GPS denied — go to Settings > Safari > Location and set to Allow");
         } else if (err.code === err.POSITION_UNAVAILABLE) {
           setGpsStatus("GPS signal unavailable");
         } else if (err.code === err.TIMEOUT) {

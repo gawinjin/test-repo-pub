@@ -149,7 +149,7 @@ export default function MainScreen({
         fontSize: settings?.fontSize || "medium",
       });
 
-      triggerDownload(blob, now);
+      await savePhoto(blob, now);
       showSuccessToast(lat, lon, now);
     } catch {
       setToast({ message: "Error saving photo. Please try again.", type: "error" });
@@ -190,7 +190,7 @@ export default function MainScreen({
           fontSize: settings?.fontSize || "medium",
         });
 
-        triggerDownload(blob, now);
+        await savePhoto(blob, now);
         showSuccessToast(lat, lon, now);
       } catch {
         setToast({ message: "Error saving photo. Please try again.", type: "error" });
@@ -202,12 +202,26 @@ export default function MainScreen({
     [getPosition, settings, note, position]
   );
 
-  const triggerDownload = (blob: Blob, now: Date) => {
+  const savePhoto = async (blob: Blob, now: Date) => {
+    const dateStr = now.toISOString().replace(/[-:T]/g, "").slice(0, 15);
+    const fileName = `geostamp_${dateStr}.jpg`;
+    const file = new File([blob], fileName, { type: "image/jpeg" });
+
+    // Use Web Share API if available (iOS Safari) — saves to camera roll without popup
+    if (navigator.share && navigator.canShare?.({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file] });
+        return;
+      } catch {
+        // User cancelled share or share failed — fall through to download
+      }
+    }
+
+    // Fallback: trigger download
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    const dateStr = now.toISOString().replace(/[-:T]/g, "").slice(0, 15);
-    a.download = `geostamp_${dateStr}.jpg`;
+    a.download = fileName;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -241,7 +255,7 @@ export default function MainScreen({
 
   const formattedCoords = position
     ? `${position.latitude.toFixed(4)}, ${position.longitude.toFixed(4)}`
-    : "Acquiring location…";
+    : "GPS unavailable";
 
   return (
     <div className="flex flex-col h-dvh">

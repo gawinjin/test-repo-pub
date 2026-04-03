@@ -30,7 +30,7 @@ export default function MainScreen({
   const [processing, setProcessing] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [position, setPosition] = useState<GeoPos | null>(null);
-  const [gpsStatus, setGpsStatus] = useState("Requesting GPS…");
+  const [gpsStatus, setGpsStatus] = useState<"requesting" | "denied" | "unavailable" | "ok">("requesting");
   const [cameraReady, setCameraReady] = useState(false);
 
   // Start camera stream
@@ -80,7 +80,7 @@ export default function MainScreen({
     let pollTimer: ReturnType<typeof setTimeout> | null = null;
 
     if (!navigator.geolocation) {
-      setGpsStatus("GPS not supported");
+      setGpsStatus("unavailable");
       return;
     }
 
@@ -92,16 +92,16 @@ export default function MainScreen({
           latitude: pos.coords.latitude,
           longitude: pos.coords.longitude,
         });
-        setGpsStatus("");
+        setGpsStatus("ok");
       },
       (err) => {
         if (!active) return;
         if (err.code === err.PERMISSION_DENIED) {
-          setGpsStatus("GPS denied — go to Settings > Safari > Location and set to Allow");
+          setGpsStatus("denied");
         } else if (err.code === err.POSITION_UNAVAILABLE) {
-          setGpsStatus("GPS signal unavailable");
+          setGpsStatus("unavailable");
         } else if (err.code === err.TIMEOUT) {
-          setGpsStatus("GPS timed out — retrying…");
+          setGpsStatus("unavailable");
         }
         // Also poll with getCurrentPosition as fallback
         startPolling();
@@ -120,7 +120,7 @@ export default function MainScreen({
               latitude: pos.coords.latitude,
               longitude: pos.coords.longitude,
             });
-            setGpsStatus("");
+            setGpsStatus("ok");
           },
           () => {
             // Keep retrying
@@ -271,9 +271,24 @@ export default function MainScreen({
     second: "2-digit",
   });
 
+  const handleRequestGps = () => {
+    // Calling getCurrentPosition from a user tap can re-trigger the browser prompt
+    setGpsStatus("requesting");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setPosition({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+        setGpsStatus("ok");
+      },
+      (err) => {
+        setGpsStatus(err.code === err.PERMISSION_DENIED ? "denied" : "unavailable");
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  };
+
   const formattedCoords = position
     ? `${position.latitude.toFixed(4)}, ${position.longitude.toFixed(4)}`
-    : gpsStatus;
+    : null;
 
   return (
     <div className="flex flex-col h-dvh">
@@ -305,9 +320,16 @@ export default function MainScreen({
       <div className="px-4 pb-2">
         <div className="bg-black/60 rounded-lg px-3 py-2 text-sm space-y-0.5">
           <p className="text-white font-mono">{formattedTime}</p>
-          <p className={`font-mono text-xs ${position ? "text-green-400" : "text-yellow-400"}`}>
-            {formattedCoords}
-          </p>
+          {formattedCoords ? (
+            <p className="font-mono text-xs text-green-400">{formattedCoords}</p>
+          ) : (
+            <button
+              onClick={handleRequestGps}
+              className="font-mono text-xs text-zinc-400 underline"
+            >
+              {gpsStatus === "requesting" ? "Requesting GPS…" : "Tap to enable GPS"}
+            </button>
+          )}
         </div>
       </div>
 

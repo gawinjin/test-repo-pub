@@ -28,7 +28,6 @@ export default function MainScreen({
     type: "success" | "error";
   } | null>(null);
   const [processing, setProcessing] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [position, setPosition] = useState<GeoPos | null>(null);
   const [gpsStatus, setGpsStatus] = useState<"requesting" | "denied" | "unavailable" | "ok">("requesting");
@@ -189,7 +188,7 @@ export default function MainScreen({
         fontSize: settings?.fontSize || "medium",
       });
 
-      savePhoto(blob);
+      savePhoto(blob, now);
       showSuccessToast(lat, lon, now);
     } catch {
       setToast({ message: "Error saving photo. Please try again.", type: "error" });
@@ -220,7 +219,7 @@ export default function MainScreen({
           fontSize: settings?.fontSize || "medium",
         });
 
-        savePhoto(blob);
+        savePhoto(blob, now);
         showSuccessToast(lat, lon, now);
       } catch {
         setToast({ message: "Error saving photo. Please try again.", type: "error" });
@@ -232,18 +231,17 @@ export default function MainScreen({
     [settings, note, position]
   );
 
-  const savePhoto = (blob: Blob) => {
-    // Revoke previous preview if any
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
+  const savePhoto = (blob: Blob, now: Date) => {
+    const dateStr = now.toISOString().replace(/[-:T]/g, "").slice(0, 15);
+    const fileName = `geostamp_${dateStr}.jpg`;
     const url = URL.createObjectURL(blob);
-    setPreviewUrl(url);
-  };
-
-  const dismissPreview = () => {
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-      setPreviewUrl(null);
-    }
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const showSuccessToast = (lat: number | null, lon: number | null, now: Date) => {
@@ -383,29 +381,6 @@ export default function MainScreen({
         className="hidden"
         onChange={handleFileCapture}
       />
-
-      {/* Photo preview overlay */}
-      {previewUrl && (
-        <div className="fixed inset-0 z-40 bg-black flex flex-col">
-          <div className="flex items-center justify-between px-4 py-3">
-            <p className="text-zinc-400 text-sm">Long-press image to save</p>
-            <button
-              onClick={dismissPreview}
-              className="text-white font-semibold px-4 py-2"
-            >
-              Done
-            </button>
-          </div>
-          <div className="flex-1 flex items-center justify-center p-4">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={previewUrl}
-              alt="Stamped photo"
-              className="max-w-full max-h-full object-contain rounded-lg"
-            />
-          </div>
-        </div>
-      )}
 
       {/* Toast */}
       {toast && (
